@@ -1,146 +1,160 @@
-import React, { Suspense, useMemo, useRef } from 'react';
-import { Canvas, useFrame, useLoader } from '@react-three/fiber';
-import { OrbitControls, Float, Icosahedron, MeshDistortMaterial, Environment, Html } from '@react-three/drei';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Environment, OrbitControls } from '@react-three/drei';
 
-function Rock() {
-  return (
-    <Float speed={1} rotationIntensity={0.4} floatIntensity={0.8}>
-      <Icosahedron args={[1.8, 2]} castShadow receiveShadow>
-        <MeshDistortMaterial color="#b9fbc0" roughness={0.95} metalness={0.02} distort={0.08} speed={1.2} />
-      </Icosahedron>
-    </Float>
-  );
+// Utility: random point on unit sphere
+function randomUnitVector() {
+  const u = Math.random();
+  const v = Math.random();
+  const theta = 2 * Math.PI * u;
+  const phi = Math.acos(2 * v - 1);
+  const x = Math.sin(phi) * Math.cos(theta);
+  const y = Math.sin(phi) * Math.sin(theta);
+  const z = Math.cos(phi);
+  return new THREE.Vector3(x, y, z).normalize();
 }
 
-function GardenBed() {
-  return (
-    <group position={[0, 0.18, 0]}>
-      {/* soil disc */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <circleGeometry args={[1.15, 64]} />
-        <meshStandardMaterial color="#6b4f37" roughness={1} />
-      </mesh>
-      {/* soft rim */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <ringGeometry args={[1.10, 1.20, 64]} />
-        <meshStandardMaterial color="#7a5a40" roughness={1} />
-      </mesh>
-    </group>
-  );
-}
-
-function Grass() {
-  // Instanced little blades around a ring for a grassy feel
-  const instRef = useRef();
-  const count = 260;
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  const color = new THREE.Color('#84cc16');
-
+function FloatingRock({ radius = 1.2, distortion = 0.15 }) {
+  const ref = useRef();
+  const geom = useMemo(() => new THREE.IcosahedronGeometry(radius, 4), [radius]);
+  // Distort vertices slightly to look like a rock
   useMemo(() => {
-    if (!instRef.current) return;
-    for (let i = 0; i < count; i++) {
-      const r = 0.35 + Math.random() * 0.7; // ring radius
-      const angle = Math.random() * Math.PI * 2;
-      const x = Math.cos(angle) * r;
-      const z = Math.sin(angle) * r;
-      const y = 0.2;
-      const scale = 0.5 + Math.random() * 0.9;
-      const lean = (Math.random() - 0.5) * 0.3;
-      dummy.position.set(x, y, z);
-      dummy.rotation.set(-Math.PI / 2 + 0.15 + lean, angle, 0);
-      dummy.scale.set(0.05, 0.05, scale);
-      dummy.updateMatrix();
-      instRef.current.setMatrixAt(i, dummy.matrix);
-      instRef.current.setColorAt(i, color.offsetHSL(0, 0, (Math.random() - 0.5) * 0.1));
+    const pos = geom.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const v = new THREE.Vector3().fromBufferAttribute(pos, i);
+      const n = v.clone().normalize();
+      const noise = (Math.sin(v.x * 2.1) + Math.sin(v.y * 1.7) + Math.sin(v.z * 2.5)) / 3;
+      v.addScaledVector(n, noise * distortion);
+      pos.setXYZ(i, v.x, v.y, v.z);
     }
-    instRef.current.instanceMatrix.needsUpdate = true;
-  }, [count, dummy, color]);
+    pos.needsUpdate = true;
+    geom.computeVertexNormals();
+  }, [geom, distortion]);
 
-  return (
-    <instancedMesh ref={instRef} args={[null, null, count]} castShadow receiveShadow>
-      <coneGeometry args={[1, 3, 5]} />
-      <meshStandardMaterial color="#84cc16" roughness={0.9} />
-    </instancedMesh>
-  );
-}
-
-function FlowerPlane({ url, index }) {
-  const [texture] = useLoader(THREE.TextureLoader, [url]);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-
-  // place in a golden-angle spiral, raised slightly from soil
-  const { x, z, y, tilt, spin } = useMemo(() => {
-    const r = 0.18 + Math.min(0.95, Math.sqrt(index + 1) * 0.1);
-    const angle = (index * 137.508) * (Math.PI / 180);
-    const x = Math.cos(angle) * r;
-    const z = Math.sin(angle) * r;
-    return { x, z, y: 0.32, tilt: 0.2 + Math.random() * 0.25, spin: angle + Math.random() * 0.5 };
-  }, [index]);
-
-  // size from image aspect
-  const planeArgs = useMemo(() => {
-    const w = texture?.image?.width || 512;
-    const h = texture?.image?.height || 512;
-    const aspect = w / h;
-    const base = 0.8; // a bit larger so it reads clearly
-    return aspect >= 1 ? [base * aspect, base] : [base, base / aspect];
-  }, [texture]);
-
-  const meshRef = useRef();
   useFrame((state) => {
-    if (!meshRef.current) return;
     const t = state.clock.getElapsedTime();
-    // gentle sway
-    meshRef.current.rotation.x = (Math.sin(t * 0.6) * 0.04) - tilt;
-    meshRef.current.rotation.y = spin + Math.sin(t * 0.4 + index) * 0.05;
+    if (ref.current) {
+      ref.current.position.y = Math.sin(t * 0.6) * 0.05;
+      ref.current.rotation.y = t * 0.03;
+    }
   });
 
   return (
-    <group position={[x, y, z]}>
-      <mesh ref={meshRef} castShadow>
-        <planeGeometry args={planeArgs} />
-        <meshBasicMaterial map={texture} transparent side={THREE.DoubleSide} />
+    <group ref={ref}>
+      <mesh geometry={geom} receiveShadow castShadow>
+        <meshStandardMaterial color="#4b5563" roughness={0.95} metalness={0.05} />
       </mesh>
     </group>
   );
 }
 
-function Scene({ plants }) {
+function GrassLayer({ count = 1600, rockRadius = 1.2, surfaceOffset = 0.01, color = '#84cc16' }) {
+  const instRef = useRef();
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const geom = useMemo(() => new THREE.ConeGeometry(0.01, 0.08, 6), []); // thin, short blade
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color, roughness: 0.8 }), [color]);
+
+  useEffect(() => {
+    for (let i = 0; i < count; i++) {
+      const dir = randomUnitVector();
+      const pos = dir.clone().multiplyScalar(rockRadius + surfaceOffset + (Math.random() * 0.005));
+      // Orient cone to point along normal (outwards)
+      dummy.position.copy(pos);
+      const up = new THREE.Vector3(0, 1, 0);
+      const quat = new THREE.Quaternion().setFromUnitVectors(up, dir.clone().normalize());
+      dummy.quaternion.copy(quat);
+      const s = 0.7 + Math.random() * 0.6;
+      dummy.scale.setScalar(s);
+      dummy.updateMatrix();
+      instRef.current.setMatrixAt(i, dummy.matrix);
+    }
+    instRef.current.instanceMatrix.needsUpdate = true;
+  }, [count, rockRadius, surfaceOffset, dummy]);
+
+  return (
+    <instancedMesh ref={instRef} args={[geom, mat, count]} castShadow receiveShadow />
+  );
+}
+
+function Flower({ src, position, normal, size = 0.35 }) {
+  const meshRef = useRef();
+  const [texture, setTexture] = useState(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const tex = new THREE.Texture(img);
+      tex.needsUpdate = true;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      setTexture(tex);
+    };
+    img.src = src;
+  }, [src]);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    const t = clock.getElapsedTime();
+    meshRef.current.position.set(position.x, position.y, position.z);
+    // gentle sway based on normal
+    const sway = Math.sin(t * 1.5 + position.x * 3.1) * 0.06;
+    const axis = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
+    if (axis.lengthSq() > 0.0001) {
+      meshRef.current.setRotationFromAxisAngle(axis.normalize(), sway);
+    }
+  });
+
+  // orient the plane so that its normal faces outwards from the rock
+  const quat = useMemo(() => {
+    const up = new THREE.Vector3(0, 0, 1); // plane faces +Z by default
+    const q = new THREE.Quaternion().setFromUnitVectors(up, normal.clone().normalize());
+    return q;
+  }, [normal]);
+
+  return (
+    <mesh ref={meshRef} quaternion={quat} position={[position.x, position.y, position.z]}>
+      <planeGeometry args={[size, size]} />
+      <meshBasicMaterial map={texture} transparent side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+function Scene({ flowers }) {
+  const rockRadius = 1.2;
   return (
     <>
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[3, 5, 3]} intensity={1} castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
-      <Rock />
-      <GardenBed />
-      <Grass />
-      {plants.map((p, i) => (
-        <FlowerPlane key={p.id} url={p.src} index={i} />
-      ))}
-      <Environment preset="sunset" />
-      <OrbitControls enablePan={false} minDistance={2.8} maxDistance={6} target={[0, 0.35, 0]} />
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[4, 6, 5]} intensity={1} castShadow />
+      <Environment preset="forest" />
+
+      <group position={[0, -0.2, 0]}>
+        <FloatingRock radius={rockRadius} />
+        {/* full surface thin grass layer */}
+        <GrassLayer count={2000} rockRadius={rockRadius} surfaceOffset={0.02} />
+        {flowers.map((f) => (
+          <Flower key={f.id} src={f.src} position={f.position} normal={f.normal} size={f.size} />
+        ))}
+      </group>
+
+      <OrbitControls enablePan={false} minDistance={2.2} maxDistance={5} />
     </>
   );
 }
 
-export default function Garden({ plants }) {
+export default function Garden({ flowers }) {
   return (
-    <div className="w-full rounded-2xl border border-rose-200 bg-gradient-to-b from-rose-50 to-rose-100 p-5 shadow-sm">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-rose-500">3D Garden</p>
-          <h3 className="text-lg font-semibold text-rose-900">Your floating rock of blooms</h3>
-        </div>
-      </div>
-      <div className="relative h-80 md:h-96 w-full overflow-hidden rounded-xl bg-gradient-to-b from-white/80 to-white">
-        <Canvas shadows camera={{ position: [0, 2.6, 4.2], fov: 45 }}>
-          <Suspense fallback={<Html center>Loading garden…</Html>}> 
-            <Scene plants={plants} />
-          </Suspense>
-        </Canvas>
-      </div>
-      <p className="mt-3 text-xs text-rose-600">Sketches now stand upright, gently swaying above a grassy bed so your blooms are easy to see.</p>
+    <div className="w-full h-[520px] rounded-2xl overflow-hidden border border-emerald-900/10 bg-emerald-900/20">
+      <Canvas shadows camera={{ position: [2.6, 1.8, 2.6], fov: 50 }}>
+        <Scene flowers={flowers} />
+      </Canvas>
     </div>
   );
+}
+
+// Helper for external usage: compute a position/normal on rock surface for planting
+export function pickRockSurfaceSpot(rockRadius = 1.2, offset = 0.02) {
+  const dir = randomUnitVector();
+  const pos = dir.clone().multiplyScalar(rockRadius + offset);
+  return { position: pos, normal: dir };
 }

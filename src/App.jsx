@@ -1,78 +1,69 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import Hero from './components/Hero';
-import PomodoroTimer from './components/PomodoroTimer';
-import FlowerStudio from './components/FlowerStudio';
-import Garden from './components/Garden';
+import Hero from './components/Hero.jsx';
+import FlowerStudio from './components/FlowerStudio.jsx';
+import PomodoroTimer from './components/PomodoroTimer.jsx';
+import Garden, { pickRockSurfaceSpot } from './components/Garden.jsx';
 
 export default function App() {
-  const [savedFlowers, setSavedFlowers] = useState([]); // array of data URLs
-  const [plants, setPlants] = useState([]); // {id, src, x,y, rotation, scale, size}
+  const [sketches, setSketches] = useState([]);
+  const [flowers, setFlowers] = useState([]);
 
-  const saveFlower = useCallback((dataUrl) => {
-    setSavedFlowers((prev) => [dataUrl, ...prev].slice(0, 12));
+  const addSketch = useCallback((url) => setSketches((s) => [url, ...s].slice(0, 12)), []);
+
+  const plantFromSketch = useCallback((src) => {
+    if (!src) return;
+    const { position, normal } = pickRockSurfaceSpot(1.2, 0.02);
+    setFlowers((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).slice(2),
+        src,
+        position,
+        normal,
+        size: 0.42,
+      },
+    ]);
   }, []);
 
-  const plantFlower = useCallback((dataUrl) => {
-    const img = new Image();
-    img.onload = () => {
-      const aspect = img.width / img.height || 1;
-      // random placement and size
-      const size = Math.round(48 + Math.random() * 48) * (aspect > 1.2 ? 0.9 : 1);
-      const newPlant = {
-        id: crypto.randomUUID(),
-        src: dataUrl,
-        x: Math.round(10 + Math.random() * 80),
-        y: Math.round(20 + Math.random() * 70),
-        rotation: Math.round((Math.random() - 0.5) * 20),
-        scale: 0.9 + Math.random() * 0.4,
-        size,
-      };
-      setPlants((prev) => [...prev, newPlant].slice(-40));
-    };
-    img.src = dataUrl;
-  }, []);
-
-  const handleFocusComplete = useCallback(() => {
-    // plant the most recent saved flower automatically on focus completion
-    if (savedFlowers.length > 0) {
-      plantFlower(savedFlowers[0]);
-    }
-  }, [savedFlowers, plantFlower]);
-
-  const recentPalette = useMemo(() => savedFlowers.slice(0, 6), [savedFlowers]);
+  const onFocusComplete = useCallback(() => {
+    if (sketches.length > 0) plantFromSketch(sketches[0]);
+  }, [sketches, plantFromSketch]);
 
   return (
-    <div className="min-h-screen bg-rose-50 text-rose-900 antialiased">
+    <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-emerald-100 to-emerald-200">
       <Hero />
 
-      <main className="mx-auto max-w-6xl px-6 -mt-10 space-y-8 pb-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <PomodoroTimer onFocusComplete={handleFocusComplete} />
-          <FlowerStudio onSaveFlower={saveFlower} onPlantFlower={plantFlower} />
-        </div>
-
-        {recentPalette.length > 0 && (
-          <div className="rounded-2xl border border-rose-200 bg-white/80 backdrop-blur p-5 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-rose-500">Your saved blooms</p>
-            <div className="mt-3 flex flex-wrap gap-3">
-              {recentPalette.map((src, i) => (
-                <button
-                  key={i}
-                  onClick={() => plantFlower(src)}
-                  className="overflow-hidden rounded-xl border border-rose-200 hover:shadow transition">
-                  <img src={src} alt={`saved flower ${i + 1}`} className="h-16 w-16 object-cover" />
-                </button>
-              ))}
+      <main className="max-w-6xl mx-auto px-4 py-8 space-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 order-2 lg:order-1">
+            <Garden flowers={flowers} />
+          </div>
+          <div className="space-y-4 order-1 lg:order-2">
+            <PomodoroTimer focusMinutes={0.1} breakMinutes={0.05} onFocusComplete={onFocusComplete} />
+            <FlowerStudio onSave={addSketch} />
+            <div className="bg-white/70 backdrop-blur rounded-2xl shadow-sm border border-emerald-900/10 p-4">
+              <div className="text-sm font-medium text-emerald-900 mb-2">Recent Sketches</div>
+              <div className="grid grid-cols-4 gap-2">
+                {sketches.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => plantFromSketch(s)}
+                    className="aspect-square rounded-lg overflow-hidden border border-emerald-900/10 hover:ring-2 hover:ring-emerald-500"
+                    title="Plant on rock"
+                  >
+                    {/* eslint-disable-next-line jsx-a11y/alt-text */}
+                    <img src={s} className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        )}
+        </div>
 
-        <Garden plants={plants} />
+        <div className="text-center text-emerald-900/70 text-sm">
+          Tip: Save a sketch, then click it to plant immediately, or let the timer do it for you at the end of a focus session.
+        </div>
       </main>
-
-      <footer className="py-8 text-center text-sm text-rose-600">
-        Made with calm, care, and a little bit of bloom.
-      </footer>
     </div>
   );
 }
